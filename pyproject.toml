@@ -5,8 +5,20 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "meshprint"
 version = "0.1.0"
-description = "MeshCore 訊息 → Epson 點陣印表機 自動列印(ESC/P2 24-pin 圖形模式)"
+description = "網狀網路電傳打字機:MeshCore / Meshtastic 訊息 → Epson 點陣印表機自動列印(ESC/P2 24-pin 圖形模式)"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "pepefrog1234"}]
 requires-python = ">=3.10"
+keywords = ["meshcore", "meshtastic", "lora", "mesh", "dot-matrix", "escp2", "teleprinter", "cups"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Communications :: Ham Radio",
+  "Topic :: Printing",
+]
 dependencies = [
   "Pillow>=10",
   "fonttools>=4.44",
@@ -19,6 +31,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/pepefrog1234/meshprint"
+Repository = "https://github.com/pepefrog1234/meshprint"
+Issues = "https://github.com/pepefrog1234/meshprint/issues"
 
 [project.scripts]
 meshprint = "meshprint.cli:main"

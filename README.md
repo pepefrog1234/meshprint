@@ -1,47 +1,80 @@
 # MeshPrint
 
-**網狀網路的電傳打字機**:把 MeshCore 節點與 Meshtastic 台灣 MQTT 頻道收到的訊息,
-即時印到 Epson LQ-310 點陣印表機的連續報表紙上——離線、可留存、斷電紀錄還在紙上,
-就像傳統 RTTY / 電報收報機。
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![Tests](https://img.shields.io/badge/tests-56%20passed-brightgreen.svg)
 
-完整規格見 [SPEC.md](SPEC.md)(v1.0 已凍結;§12 為 v1.1 增補的 MQTT 來源)。
+**網狀網路的電傳打字機(teleprinter)**:把 MeshCore 節點與 Meshtastic 台灣 MQTT 頻道
+收到的訊息,即時印到 Epson LQ-310 點陣印表機的連續報表紙上——離線、可留存、
+斷電後紀錄仍在紙上,就像傳統 RTTY / 電報收報機。
+
+適合:業餘無線電與 LoRa mesh 玩家、社群基地台/中繼站、災害應變據點——任何想要
+「訊息一到就有一張紙,不靠螢幕、不靠雲端」的場合。
+
+完整技術規格見 [SPEC.md](SPEC.md)(v1.0 已凍結;§12 為 v1.1 增補的 MQTT 來源)。
 
 ---
 
 ## 目錄
 
-1. [功能總覽](#功能總覽)
-2. [系統架構](#系統架構)
-3. [工作原理](#工作原理)
-4. [硬體與環境需求](#硬體與環境需求)
-5. [安裝](#安裝)
-6. [快速開始(印表機到貨 runbook)](#快速開始印表機到貨-runbook)
-7. [命令列用法](#命令列用法)
-8. [設定檔](#設定檔)
-9. [Meshtastic MQTT 台灣頻道](#meshtastic-mqtt-台灣頻道)
-10. [日常運作行為](#日常運作行為)
-11. [疑難排解](#疑難排解)
-12. [測試](#測試)
-13. [專案狀態與里程碑](#專案狀態與里程碑)
-14. [與規格的已知差異](#與規格的已知差異)
+1. [背景知識](#背景知識)
+2. [功能總覽](#功能總覽)
+3. [系統架構](#系統架構)
+4. [工作原理](#工作原理)
+5. [硬體與環境需求](#硬體與環境需求)
+6. [安裝](#安裝)
+7. [設定印表機(CUPS 佇列)](#設定印表機cups-佇列)
+8. [快速開始](#快速開始)
+9. [命令列用法](#命令列用法)
+10. [設定檔](#設定檔)
+11. [Meshtastic MQTT 頻道](#meshtastic-mqtt-頻道)
+12. [日常運作行為](#日常運作行為)
+13. [疑難排解](#疑難排解)
+14. [測試與開發](#測試與開發)
+15. [專案狀態與里程碑](#專案狀態與里程碑)
+16. [與規格的已知差異](#與規格的已知差異)
+17. [授權與致謝](#授權與致謝)
+
+---
+
+## 背景知識
+
+**MeshCore 與 Meshtastic** 都是用 LoRa 無線電組成的去中心化文字通訊網路:
+節點之間互相轉發,不需要基地台或網際網路,適合登山、災害、社群自建通訊。
+
+- **MeshCore**:節點刷 *companion radio* 韌體後,可用 USB serial 接電腦,
+  由電腦端程式(本專案用官方 `meshcore` Python 函式庫)收發訊息。本專案把它當
+  「收報機」——只收不發。
+- **Meshtastic**:台灣社群「臺灣鏈網」的閘道器節點會把空中收到的封包上傳到公共
+  MQTT broker;本專案訂閱 broker、用社群頻道金鑰解密,不需要自己有 Meshtastic 節點
+  就能把台灣的聊天頻道印出來。
+
+**為什麼是點陣印表機?** 點陣機配連續報表紙可以無人值守長時間輸出,一張票一張票
+往下滾,斷電後紙還在;而且 Epson LQ-310 這種 24 針機型至今仍在產、耗材便宜。
+缺點是**國際版沒有中文字庫**——所以本專案完全不用印表機的文字模式,而是把整張票
+在電腦上畫成黑白點陣圖,再用 ESC/P2 的 24-pin 圖形指令「一根針一根針」地打出來。
+字型、排版、缺字處理全由軟體掌控,繁中/日/韓/英數都能印。
+
+**為什麼走 CUPS raw?** macOS / Linux 的列印系統 CUPS 平常會把文件經過驅動程式
+「翻譯」成印表機語言;本專案自己產生印表機語言(ESC/P2 bytes),所以用 `lp -o raw`
+叫 CUPS 原封不動轉送,驅動程式選什麼都無所謂。
 
 ---
 
 ## 功能總覽
 
 - **兩種訊息來源,可同時或單獨啟用**
-  - MeshCore 節點(USB serial、companion radio 韌體):私訊 + 頻道訊息,拔線自動重連。
-  - Meshtastic MQTT(臺灣鏈網公共 broker):SignalTest、MeshTW、Emergency! 等台灣頻道,
-    自帶解密金鑰,純唯讀。
+  - MeshCore 節點(USB serial):私訊 + 頻道訊息,拔線/重開自動重連。
+  - Meshtastic MQTT:臺灣鏈網 SignalTest、MeshTW、Emergency! 等頻道,內建金鑰,純唯讀。
 - **單據式版面**:每則訊息一張「票」——來源/時間、寄件者/hops/SNR、分隔線、內文自動換行。
-- **繁中/日/韓/英數全靠軟體點陣化**:印表機沒有中文字庫,整張票在電腦端畫成 1-bit
-  點陣圖,以 ESC/P2 24-pin 圖形模式輸出;缺字沿字型鏈備援,Emoji 印「□」。
+- **軟體點陣化**:繁中/日/韓/英數全部由電腦渲染;缺字沿字型鏈備援,Emoji 印「□」。
 - **可靠性**:磁碟 spool、追蹤 CUPS 真的印完才歸檔、印表機關機不丟訊息、開機自動補印
   (或依保鮮期略過)、佇列被 macOS 暫停自動救回、去重持久化、訊息風暴保護、渲染失敗
   ASCII 降級。
 - **過濾**:私訊開關、頻道清單、忽略名單(名稱或節點前綴)。
 - **免硬體開發**:PNG 預覽、golden bytes 測試、假 CUPS / 假 MeshCore 物件——56 項測試
   全部不需要印表機或節點。
+- **可攜**:macOS 為主要目標,程式碼保持 Linux(含 Raspberry Pi)相容。
 
 ---
 
@@ -62,13 +95,13 @@
                                        escp2.py    影像 → ESC/P2 bytes    │
                                              │                            │
                                        spool.py    落地 ~/.meshprint/spool/*.prn
-                                             │       lp -o raw → CUPS 佇列 LQ310
+                                             │       lp -o raw → CUPS 佇列
                                              │       lpstat 確認印完 → done/
                                              ▼
                                        Epson LQ-310(USB,raw 佇列)
 ```
 
-| 模組 | 職責 | 純函式/可離線測試 |
+| 模組 | 職責 | 可離線測試 |
 |---|---|---|
 | `meshprint/model.py` | 統一訊息物件 `InboundMessage` 與票頭字串 | ✔ |
 | `meshprint/node.py` | MeshCore 連線監督、事件 → 訊息、頻道寄件者拆解 | 對應部分 ✔ |
@@ -91,7 +124,8 @@
 
 ### 1. 訊息統一模型
 所有來源先轉成 `InboundMessage`(種類、內文、接收時間、寄件者名稱/前綴、頻道、
-發送端時戳、hops/SNR 等附加資訊)。之後的每一級都只認這個物件,不知道訊息從哪來。
+發送端時戳、hops/SNR 等附加資訊)。之後的每一級都只認這個物件,不知道訊息從哪來——
+所以要加第三種來源(例如 APRS、Meshtastic 本地節點)只要多寫一個來源模組。
 
 ### 2. 過濾與去重
 - `filters.should_print()`:私訊開關 → 頻道編號清單(只約束 MeshCore 頻道)→ 忽略名單。
@@ -113,7 +147,7 @@
 - 全白帶只走紙不送資料;每帶左右全白裁掉並用 `ESC $`(1/60 吋單位)定位起印,
   減少資料量與印字頭空跑。
 - 每則訊息是自足 job:`ESC @` 初始化、`ESC U 1` 單向列印(圖形帶才對得齊)、
-  圖形帶、走紙 `feed_after_lines` 行、(選配)換頁。
+  圖形帶、走紙 `feed_after_lines` 行、(選配)換頁。一張兩行的票約 20 KB。
 
 ### 5. spool 與 CUPS(spool.py)
 - 每則訊息 = `spool/<UTC時間>-<序號>.prn` + 同名 `.json` 中繼資料;先寫暫存檔再原子改名。
@@ -134,71 +168,107 @@
 
 | 項目 | 需求 |
 |---|---|
-| 印表機 | Epson LQ-310(或任何 ESC/P2 相容 24-pin 機型),USB,連續報表紙 |
-| 節點(選配) | 刷 `companion_radio_usb` 韌體的 MeshCore 相容板,USB 接上出現 `/dev/cu.usbmodem*` |
-| 作業系統 | macOS(主要目標);程式碼保持 Linux 相容 |
-| Python | ≥ 3.10(`meshcore` 套件硬性要求) |
-| 相依套件 | Pillow、fonttools、meshcore、paho-mqtt、meshtastic、cryptography(pyproject 自動安裝) |
-| 字型 | Noto Sans CJK TC(已裝在 `~/Library/Fonts/NotoSansCJKtc-Regular.otf`);找不到時自動改用系統字型鏈 |
-| CUPS 佇列 | `LQ310`(raw 佇列;本系統全部走 `-o raw`,驅動無關) |
+| 印表機 | Epson LQ-310(或任何 ESC/P2 相容 24-pin 機型),USB 連接,連續報表紙(9.5 吋寬、撕邊後 8.5 吋) |
+| 節點(選配) | 刷 `companion_radio_usb` 韌體的 MeshCore 相容板(Heltec V3、T-Beam、RAK 等),USB 接上出現 `/dev/cu.usbmodem*`(macOS)或 `/dev/ttyACM*`(Linux) |
+| 網路(選配) | 要印 Meshtastic MQTT 頻道才需要;只接節點可完全離線 |
+| 作業系統 | macOS(主要目標)或 Linux(含 Raspberry Pi OS),需有 CUPS |
+| Python | ≥ 3.10(`meshcore` 套件硬性要求;3.10 會自動用 `tomli` 讀 TOML) |
+| 相依套件 | Pillow、fonttools、meshcore、paho-mqtt、meshtastic、cryptography(`pip install` 自動安裝) |
+| 字型 | 建議 [Noto Sans CJK TC](https://github.com/notofonts/noto-cjk/tree/main/Sans)(單一字型涵蓋繁中/日/韓/英數);找不到時自動改用系統字型鏈 |
 
 ---
 
 ## 安裝
 
-**本機環境已就緒,不用安裝任何東西**——專案 `.venv` 內建 CPython 3.12 與全部依賴,
-所有指令用 `.venv/bin/meshprint` 執行即可。
-
-背景:系統 Python 只有 3.9,而 `meshcore` 要求 ≥ 3.10,因此 `.venv` 是用
-[uv](https://docs.astral.sh/uv/) 佈建的 standalone CPython 3.12。只有在**重建環境**時
-才需要 uv(已裝在 `~/Library/Python/3.9/bin/uv`,不在 PATH 內,用完整路徑呼叫):
+### 通用步驟(macOS / Linux)
 
 ```bash
-~/Library/Python/3.9/bin/uv venv .venv --python 3.12
+git clone https://github.com/pepefrog1234/meshprint.git
+cd meshprint
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
 ```
 
+`python3` 必須 ≥ 3.10(`python3 --version` 檢查)。之後所有指令用 `.venv/bin/meshprint`;
+或 `source .venv/bin/activate` 後直接打 `meshprint`。
+
+### 字型
+
+把 `NotoSansCJKtc-Regular.otf` 放到 `~/Library/Fonts/`(macOS)或在設定檔
+`[render] font` 指定路徑。沒裝也能跑:程式會依序尋找系統內的繁中字型
+(PingFang、Heiti TC、Linux 的 Noto 套件路徑…)並在 log 提醒改用了哪一個。
+Linux 可 `apt install fonts-noto-cjk`,再設 `font = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"`
+(集合檔要用 `font_index` 指定繁中 face,或交給自動探索)。
+
+### 沒有 Python 3.10+ 的機器
+
+例如 macOS 系統內建只有 3.9。用 [uv](https://docs.astral.sh/uv/) 抓一個獨立的 CPython,
+不需要管理員權限、不動系統:
+
 ```bash
+pip3 install --user uv
+~/Library/Python/3.9/bin/uv venv .venv --python 3.12
 ~/Library/Python/3.9/bin/uv pip install --python .venv/bin/python -e ".[dev]"
 ```
 
-其他機器(已有 Python ≥ 3.10):`python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"`。
+(`~/Library/Python/3.9/bin` 是 macOS 系統 pip 的 `--user` 安裝位置;Linux 通常是
+`~/.local/bin/uv`。)
+
+### 檢查安裝
+
+```bash
+.venv/bin/meshprint status
+.venv/bin/meshprint preview "哈囉 世界" -o out.png
+```
+
+`status` 會列出設定檔、字型鏈、CUPS 佇列、MQTT、節點裝置、spool 狀態;
+`preview` 免硬體產生一張票的 PNG,打開看看版面。
 
 ---
 
-## 快速開始(印表機到貨 runbook)
+## 設定印表機(CUPS 佇列)
 
-以下指令都在專案資料夾內執行(先 `cd ~/Documents/print`);或把 `.venv/bin/meshprint`
-換成完整路徑 `~/Documents/print/.venv/bin/meshprint`,就能在任何位置執行。
+接上 USB、開機後:
 
-1. 接上 LQ-310 USB、裝連續報表紙、開機。
-2. 確認 CUPS 佇列:
+```bash
+lpstat -e
+```
 
-   ```bash
-   lpstat -e
-   ```
+有列出佇列就直接用(程式 `queue = "auto"` 會自動抓系統唯一的那個)。
+**macOS 通常不會自動幫 LQ-310 這種老 USB 印表機建佇列**,列出來是空的就手動建一次
+(永久有效,重開機、關印表機都不會消失):
 
-   應列出 `LQ310`。若是空的(macOS 不會自動幫這種老 USB 印表機建佇列),手動建一次
-   即永久有效:
+```bash
+lpinfo --include-schemes usb -v          # 找到 usb://EPSON/LQ-310?serial=…
+lpadmin -p LQ310 -E -v "usb://EPSON/LQ-310?serial=你的序號"
+```
 
-   ```bash
-   lpadmin -p LQ310 -E -v "usb://EPSON/LQ-310?serial=001012607140937330"
-   ```
+不指定驅動(`-m`)建出來的是 raw 佇列,正是本專案要的;`-m everywhere` 對這種
+非 IPP 印表機會失敗,屬正常。Linux 同樣指令(可能需要 `sudo`,或把使用者加入 `lpadmin` 群組)。
+有多台印表機時在設定檔 `[printer] queue` 明確指定。
 
-   (序號以 `lpinfo --include-schemes usb -v` 查到的為準。)
-3. 印校正頁,量標尺(吋距 25.4 mm、總誤差 < 1 mm)、看全寬實線左右有沒有被裁、看四種字級是否清晰:
+---
+
+## 快速開始
+
+以下指令在專案資料夾內執行(先 `cd` 進去);或把 `.venv/bin/meshprint` 換成完整路徑
+(例如 `~/Documents/print/.venv/bin/meshprint`)就能在任何位置執行。
+
+1. **校正**:印校正頁,量標尺(吋距 25.4 mm、總誤差 < 1 mm)、看全寬實線左右有沒有被裁、
+   看四種字級是否清晰:
 
    ```bash
    .venv/bin/meshprint calibrate
    ```
 
-   字壓到紙的右側虛線 → 在設定檔縮小 `[printer] width_dots`(本機已設 1332 = 7.4 吋)。
-4. 印一張真票驗證完整管線:
+   字壓到報表紙右側虛線 → 在設定檔縮小 `[printer] width_dots`(例如 1332 = 7.4 吋)。
+2. **印一張真票**驗證完整管線:
 
    ```bash
    .venv/bin/meshprint test "LQ-310 上線!繁中かな한글 123"
    ```
 
-5. 開常駐:
+3. **開常駐**:
 
    ```bash
    .venv/bin/meshprint run
@@ -224,8 +294,8 @@
 
 ## 設定檔
 
-位置 `~/.config/meshprint/config.toml`;不存在時全部用預設值。只需要寫想覆蓋的欄位。
-**本機目前的設定**(業主實機校正後):
+位置 `~/.config/meshprint/config.toml`;不存在時全部用預設值(第一次跑不需要任何設定檔)。
+只需要寫想覆蓋的欄位。一份實機用的範例:
 
 ```toml
 [printer]
@@ -248,14 +318,14 @@ max_age_minutes = 10     # 超過 10 分鐘沒能送印的訊息略過(睡覺關
 [node]                    # MeshCore 節點來源
 enabled = true
 transport = "serial"
-port = "auto"             # 或 "/dev/cu.usbmodem14401"
+port = "auto"             # 或 "/dev/cu.usbmodem14401"、"/dev/ttyACM0"
 baud = 115200
 
 [mqtt]                    # Meshtastic MQTT 來源(見下一節)
 enabled = false
 host = "mqtt.meshtastic.org"
 port = 1883
-username = "meshdev"      # 官方公開帳密
+username = "meshdev"      # Meshtastic 官方公開帳密
 password = "large4cats"
 tls = false
 root = "msh/TW"
@@ -264,10 +334,10 @@ label = "MQTT"            # 票頭來源標示
 
 [printer]
 queue = "auto"            # CUPS 佇列名;"auto" = 系統唯一的那個
-width_dots = 1440         # 可印寬度(點;1 點 = 1/180 吋)
+width_dots = 1440         # 可印寬度(點;1 點 = 1/180 吋;LQ-310 上限 1440)
 left_margin_dots = 24     # 左右對稱邊界
 feed_after_lines = 4      # 每張票後走紙幾行(1 行 = 1/6 吋)
-form_feed = false         # 連續紙不換頁
+form_feed = false         # 連續紙不換頁;A4 單張才設 true
 
 [render]
 font = "~/Library/Fonts/NotoSansCJKtc-Regular.otf"
@@ -275,7 +345,7 @@ font_index = 0            # .ttc 集合檔的 face 索引
 fallback_fonts = []       # 備援字型:"路徑" 或 "路徑#索引"
 body_px = 28              # 內文字級(下限 24)
 header_px = 24            # 標題/寄件者列字級
-max_body_lines = 40
+max_body_lines = 40       # 內文超過就截斷
 timezone = "Asia/Taipei"
 time_format = "%Y-%m-%d %H:%M:%S"
 
@@ -294,17 +364,18 @@ max_age_minutes = 0       # >0:逾時未送印即略過;0 = 永久補印
 
 ---
 
-## Meshtastic MQTT 台灣頻道
+## Meshtastic MQTT 頻道
 
 臺灣鏈網(Meshtastic Taiwan Community)使用官方公共 broker `mqtt.meshtastic.org`,
-root topic `msh/TW`(`mqtt.meshtastic.tw` 這個網域不存在)。程式訂閱 `msh/TW/#`,
-從 ServiceEnvelope 解出 MeshPacket,用頻道金鑰 AES-CTR 解密,只把 TEXT 訊息印出來。
+root topic `msh/TW`。程式訂閱 `msh/TW/#`(含子區域),從 ServiceEnvelope 解出 MeshPacket,
+用頻道金鑰 AES-CTR 解密,只把 TEXT 訊息印出來;NODEINFO 封包用來累積節點名稱,
+位置/遙測等一律丟棄。
 
 內建頻道組(金鑰解自社群公開發布的頻道 QR,2026-01 版):
 
 | 頻道 | 金鑰 | 角色 |
 |---|---|---|
-| **SignalTest** | 社群 AES-256 | 臺灣最熱絡的聊天頻道(主印) |
+| **SignalTest** | 社群 AES-256 | 臺灣最熱絡的聊天頻道 |
 | MeshTW | 社群 AES-256 | 社群頻道 |
 | Emergency! | 社群 AES-256 | 緊急頻道 |
 | MediumFast | 預設鍵 `AQ==` | 主頻道,幾乎都是遙測/位置(非 TEXT 一律丟棄) |
@@ -321,6 +392,10 @@ psk = "y1HciVgpl5Hzh05KJUe/umWUH8XhG3UjR1rvZHfUHFU="
 name = "某頻道"
 psk = "AQ=="              # 1 byte = 預設鍵變體;16/32 bytes base64 = AES-128/256
 ```
+
+**其他地區的社群**:把 `root` 改成該地區的 root topic(例如 `msh/US`、`msh/EU_868`),
+頻道與金鑰換成當地的即可;頻道 QR / `meshtastic.org/e/#…` 連結裡的 ChannelSet protobuf
+含有每個頻道的 PSK,用 `meshtastic` Python 套件的 `apponly_pb2.ChannelSet` 解開就能取得。
 
 行為要點:純唯讀(永不 publish);多閘道器重複轉發以封包 id 去重;寄件者名稱由
 NODEINFO 封包累積(冷啟動初期可能只看到節點 ID 末 6 碼);PKI 私訊無法解密一律略過;
@@ -356,18 +431,20 @@ NODEINFO 封包累積(冷啟動初期可能只看到節點 ID 末 6 碼);PKI 私
 
 | 症狀 | 原因與處理 |
 |---|---|
-| `zsh: no such file or directory: .venv/bin/meshprint` | 不在專案資料夾。先 `cd ~/Documents/print`,或用完整路徑 `~/Documents/print/.venv/bin/meshprint` |
-| `lpstat -e` 沒顯示東西 | 佇列從沒建過(macOS 不會自動幫老 USB 印表機建)。先 `lpinfo --include-schemes usb -v` 確認看得到 `usb://EPSON/LQ-310`,再照 runbook 第 2 步 `lpadmin` 建一次 |
+| `zsh: no such file or directory: .venv/bin/meshprint` | 不在專案資料夾。先 `cd` 進去,或用完整路徑 |
+| `lpstat -e` 沒顯示東西 | 佇列從沒建過(macOS 不會自動幫老 USB 印表機建)。先 `lpinfo --include-schemes usb -v` 確認看得到 `usb://EPSON/LQ-310`,再照上面 `lpadmin` 建一次 |
 | 字偏右、印到報表紙虛線 | 可印寬度太寬。縮小 `[printer] width_dots`(1332 = 7.4 吋);整體要右移就加大 `left_margin_dots`;或把印表機後方齒孔牽引器整組往右挪 |
-| 開機後不印、`status` 顯示待印 > 0 | 看 `run` 的 log:「印表機未上線」= USB 沒偵測到;「佇列可能暫停」= 手動 `cupsenable LQ310` |
+| 開機後不印、`status` 顯示待印 > 0 | 看 `run` 的 log:「印表機未上線」= USB 沒偵測到;「佇列可能暫停」= 手動 `cupsenable <佇列>` |
 | SignalTest 明明有人聊卻沒印 | 社群換了金鑰;重解新版頻道 QR 更新 `psk` |
-| 韓文/罕用字印成「□」 | 字型鏈全缺字。裝 Noto Sans CJK TC(已裝)或在 `[render] fallback_fonts` 加字型 |
+| 韓文/罕用字印成「□」 | 字型鏈全缺字。裝 Noto Sans CJK TC,或在 `[render] fallback_fonts` 加字型 |
+| 節點插著但一直「等待裝置」 | 檢查 `ls /dev/cu.usbmodem*`(Linux `/dev/ttyACM*`);多個裝置時在 `[node] port` 指定;確認刷的是 `companion_radio_usb` 而非 BLE 版 |
+| `meshprint run` 說缺少 meshcore | Python 版本 < 3.10;見「沒有 Python 3.10+ 的機器」 |
 | 改設定沒反應 | 設定檔啟動時讀取,`Ctrl-C` 重開 `run` |
-| 找不到 `uv` | 一般使用不需要;重建環境時用 `~/Library/Python/3.9/bin/uv` |
+| 字太細/筆畫斷 | 點陣機不吃細筆畫;把字級調大(`body_px`)、換 Medium 字重的字型 |
 
 ---
 
-## 測試
+## 測試與開發
 
 ```bash
 .venv/bin/python -m pytest
@@ -382,6 +459,27 @@ NODEINFO 封包累積(冷啟動初期可能只看到節點 ID 末 6 碼);PKI 私
 - `test_spool.py`:假 CUPS——送印/完成/歸檔、lp 失敗重試、風暴上限、印表機離線不送、佇列暫停自動恢復、保鮮期、done 修剪。
 - `test_daemon.py`:`handle_message` 整合(過濾 → 去重 → 渲染 → spool → 風暴警示票)。
 
+### 加一個新的訊息來源
+
+1. 新模組實作 `async def run(self, stop: asyncio.Event)`:連線、收訊息、斷線重連,
+   每收到一則就呼叫建構時傳入的 `on_message(InboundMessage)`,看到 `stop` 就收尾。
+2. 把 payload 對應成 `InboundMessage`(`kind`、`text`、`rx_time` 必填;有頻道編號就填
+   `channel_idx`,沒有就填 `channel_name` 讓票頭只印名稱;`extra["path_len"]`/`["SNR"]`
+   會自動印在票的右上)。對應邏輯寫成純函式,方便離線測試。
+3. 在 `daemon.run_daemon()` 的 `producers` 依設定開關加入;`config.py` 加對應的設定區段。
+過濾、去重、版面、spool 全部不用動。
+
+### 改版面
+
+`render.py` 的 `Renderer.ticket()`:高度公式與繪製順序一一對應,改了一邊記得改另一邊;
+用 `meshprint preview` 免耗紙看結果。分隔線厚度、間距在檔案頂部的常數。
+
+### 回報問題
+
+開 [issue](https://github.com/pepefrog1234/meshprint/issues) 時請附:`meshprint status`
+輸出、`meshprint -v run` 的 log 片段、印表機型號與紙張;版面問題附 `preview` 的 PNG。
+送 PR 前請確認 `pytest` 全過。
+
 ---
 
 ## 專案狀態與里程碑
@@ -389,11 +487,12 @@ NODEINFO 封包累積(冷啟動初期可能只看到節點 ID 末 6 碼);PKI 私
 | 里程碑 | 狀態 |
 |---|---|
 | M1 編碼器 + 版面 + `preview`/`test` CLI | ✅ 2026-08-27,T-1 golden bytes 通過 |
-| M2 實機列印與校正 | ✅ 2026-08-28,LQ-310 校正完成(width_dots 1332) |
+| M2 實機列印與校正 | ✅ 2026-08-28,LQ-310 校正完成 |
 | M3 MeshCore 整合、過濾、去重、spool | ✅ 2026-08-27 程式完成;T-4/T-5 端對端待節點 |
 | v1.1 Meshtastic MQTT 台灣頻道來源(SPEC §12) | ✅ 2026-08-28,實連 broker 驗證解密 |
-| 冷啟動保護、保鮮期、忽略名單 | ✅ 2026-08-28 ~ 29(業主日常需求) |
-| M4 launchd 服務化(開機自動跑、當掉自動重拉、log 寫檔) | ⏳ |
+| 冷啟動保護、保鮮期、忽略名單 | ✅ 2026-08-28 ~ 29 |
+| M4 launchd / systemd 服務化(開機自動跑、當掉自動重拉、log 寫檔) | ⏳ |
+| v2 構想(SPEC §10) | 網路印表伺服器 9100 埠輸出、iOS 直印、Meshtastic 本地節點、QR code 附印、每日頁首 |
 
 ---
 
@@ -406,3 +505,17 @@ NODEINFO 封包累積(冷啟動初期可能只看到節點 ID 末 6 碼);PKI 私
 - **佇列偵測**:用 `lpstat -e` 而非 `-p`(macOS 說明文字會在地化)。
 - **Python 版本**:規格 ≥ 3.10;`tomllib` 3.11 才內建,3.10 以 `tomli` 相容。
 - **MQTT 來源**:規格 §10 列為 v2,提前以 §12 增補實作。
+
+---
+
+## 授權與致謝
+
+本專案以 [MIT License](LICENSE) 釋出。
+
+- [MeshCore](https://meshcore.co.uk/) 與官方 Python 函式庫 [meshcore_py](https://github.com/meshcore-dev/meshcore_py)
+- [Meshtastic](https://meshtastic.org/) 與 [meshtastic-python](https://github.com/meshtastic/python)(protobuf 定義)
+- [臺灣鏈網 Meshtastic Taiwan Community](https://meshtw.github.io/) 公開的頻道組與 MQTT 設定
+- [Noto Sans CJK](https://github.com/notofonts/noto-cjk)(SIL Open Font License)
+- Pillow、fonttools、paho-mqtt、cryptography
+
+規格書由業主與 Claude 共同擬定,程式碼由 Claude 實作、業主實機驗證。
