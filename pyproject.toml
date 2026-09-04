@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meshprint"
+version = "0.1.0"
+description = "MeshCore 訊息 → Epson 點陣印表機 自動列印(ESC/P2 24-pin 圖形模式)"
+requires-python = ">=3.10"
+dependencies = [
+  "Pillow>=10",
+  "fonttools>=4.44",
+  "meshcore>=2.1",
+  "paho-mqtt>=2",
+  "meshtastic>=2.5",
+  "cryptography>=42",
+  "tomli>=2; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+meshprint = "meshprint.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["meshprint*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
